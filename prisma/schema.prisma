@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Giáo viên: Admin, GVCN và người được xem lớp
+model Teacher {
+  id             String    @id @default(cuid())
+  name           String
+  phone          String?
+  role           String    @default("TEACHER") // SUPER_ADMIN | ADMIN | TEACHER
+  pinHash        String
+  mustChangePin  Boolean   @default(true)
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  classAccess         ClassViewer[]
+  createdCompetitions Competition[]
+
+  @@index([isActive])
+}
+
+/// Lớp học theo từng năm học (6A1 năm 2026-2027 khác 6A1 năm 2027-2028)
+model ClassRoom {
+  id           String   @id @default(cuid())
+  name         String
+  grade        Int
+  academicYear String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  viewers      ClassViewer[]
+  students     Student[]
+  members      ClassMembership[]
+  competitions CompetitionClass[]
+
+  @@unique([name, academicYear])
+  @@index([isActive, grade])
+}
+
+/// Quyền xem lớp: một lớp có thể có nhiều người xem
+model ClassViewer {
+  classId   String
+  teacherId String
+  role      String   @default("VIEWER") // HOMEROOM (GVCN: được reset PIN) | VIEWER (chỉ xem)
+  createdAt DateTime @default(now())
+
+  classRoom ClassRoom @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher   Teacher   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@id([classId, teacherId])
+  @@index([teacherId])
+}
+
+model Student {
+  id             String    @id @default(cuid())
+  code           String?   // Mã học sinh (tuỳ chọn)
+  name           String
+  dob            DateTime? // Ngày sinh, dùng phân biệt trùng tên
+  classId        String
+  pinHash        String
+  mustChangePin  Boolean   @default(true)
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  classRoom   ClassRoom           @relation(fields: [classId], references: [id])
+  submissions StudentSubmission[]
+  memberships ClassMembership[]
+
+  @@index([classId, isActive])
+}
+
+/// Lịch sử học sinh từng thuộc lớp nào: giữ đúng sĩ số và danh sách lớp năm cũ sau khi lên lớp
+model ClassMembership {
+  studentId String
+  classId   String
+  createdAt DateTime @default(now())
+
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classRoom ClassRoom @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, classId])
+  @@index([classId])
+}
+
+model Competition {
+  id                  String    @id @default(cuid())
+  title               String
+  description         String?
+  link                String?
+  deadline            DateTime
+  status              String    @default("ACTIVE") // ACTIVE | CLOSED_EARLY
+  allowLateSubmission Boolean   @default(true)
+  academicYear        String
+  isArchived          Boolean   @default(false) // Đã dọn ảnh minh chứng
+  archivedAt          DateTime?
+  creatorId           String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  creator     Teacher             @relation(fields: [creatorId], references: [id])
+  classes     CompetitionClass[]
+  submissions StudentSubmission[]
+
+  @@index([academicYear, deadline])
+}
+
+/// Cuộc thi được giao theo lớp
+model CompetitionClass {
+  competitionId String
+  classId       String
+
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  classRoom   ClassRoom   @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@id([competitionId, classId])
+  @@index([classId])
+}
+
+model StudentSubmission {
+  id              String   @id @default(cuid())
+  competitionId   String
+  studentId       String
+  classIdAtSubmit String   // Lớp tại thời điểm nộp, giữ đúng báo cáo năm cũ sau khi lên lớp
+  status          String   @default("ON_TIME") // ON_TIME | LATE
+  imageKey        String?  // Khoá ảnh trên R2 (null sau khi dọn ảnh)
+  thumbKey        String?
+  sizeBytes       Int?
+  note            String?
+  submittedAt     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([competitionId, studentId])
+  @@index([competitionId, classIdAtSubmit])
+  @@index([studentId])
+}
